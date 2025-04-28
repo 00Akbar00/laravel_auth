@@ -3,192 +3,179 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
-use App\Models\UserVerification;
-use App\Models\Session;
-use App\Models\PasswordReset;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Mail;
-use App\Mail\WelcomeEmail;
-use Illuminate\Support\Facades\Cookie;
-use Carbon\Carbon;
+use App\Mail\WelcomeMail;
+use App\Services\TokenService;
 
 class AuthController extends Controller
 {
-    public function showRegisterForm()
-    {
-        return view('register');
+    protected $tokenService;
+
+    public function __construct(TokenService $tokenService){
+        $this->tokenService = $tokenService;
     }
+    // signup
+    public function signup(Request $request){
+        try {
+            $request->validate([
+                'name' => 'required|string|max:255',
+                'email' => 'required|email|unique:users,email',
+                'password' => 'required|string|min:6|confirmed',
+            ]);
 
-    public function register(Request $request)
-    {
-        $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users,email',
-            'password' => 'required|string|min:8|confirmed',
-        ]);
+            $user = User::create([
+                'name' => $request->name,
+                'email' => $request->email,
+                'password' => Hash::make($request->password),
+            ]);
 
-        $user = User::create([
-            'name' => $request->name,
-            'email' => $request->email,
-            'passwordHash' => Hash::make($request->password),
-            'status' => 'unverified',
-        ]);
+            Mail::to($user->email)->send(new WelcomeMail($user));
 
-        // Create verification token
-        $verificationToken = Str::uuid();
-        UserVerification::create([
-            'userId' => $user->id,
-            'verificationToken' => $verificationToken,
-            'expiresAt' => Carbon::now()->addDays(1),
-        ]);
-
-        // Send welcome email
-        Mail::to($user->email)->send(new WelcomeEmail($user, $verificationToken));
-
-        return redirect()->route('login')->with('success', 'Registration successful! Please check your email for verification.');
-    }
-
-    public function showLoginForm()
-    {
-        return view('login');
-    }
-
-    public function login(Request $request)
-    {
-        $request->validate([
-            'email' => 'required|string|email',
-            'password' => 'required|string',
-        ]);
-
-        $user = User::where('email', $request->email)->first();
-
-        if (!$user || !Hash::check($request->password, $user->passwordHash)) {
-            return back()->withErrors(['email' => 'Invalid credentials'])->withInput();
+            return response()->json([
+                'message' => 'User registered successfully. A welcome email has been sent.'
+            ], 201);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'An error occurred during signup: ' . $e->getMessage()
+            ], 500);
         }
+    }
+    // Login
+    public function login(Request $request){
+        try {
+            $validated = $request->validate([
+                'email' => 'required|email',
+                'password' => 'required',
+            ]);
 
-        if ($user->status === 'unverified') {
-            return back()->withErrors(['email' => 'Please verify your email first'])->withInput();
+            $user = User::where('email', $validated['email'])->first();
+
+            if (!$user || !Hash::check($validated['password'], $user->password)) {
+                return response()->json(['message' => 'Invalid credentials'], 401);
+            }
+
+            $token = $this->tokenService->generateToken($user);
+
+            return response()->json([
+                'message' => 'Login successful',
+                'token' => $token,
+            ], 200);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'An error occurred during login',
+                'error' => $e->getMessage(),
+            ], 500);
         }
-
-        // Create session
-        $sessionId = Str::random(64);
-        $session = Session::create([
-            'userId' => $user->id,
-            'sessionId' => $sessionId,
-            'ipAddress' => $request->ip(),
-            'userAgent' => $request->userAgent(),
-            'metadata' => [],
-            'expiresAt' => Carbon::now()->addDays(30),
-        ]);
-
-        // Set session cookie
-        $cookie = Cookie::make('session_token', $sessionId, 60 * 24 * 30); // 30 days
-
-        return redirect()->intended('/')->cookie($cookie);
     }
+    // Send otp
+    public function sendOtp(Request $request){
+        try {
+            $validated = $request->validate([
+                'email' => 'required|email',
+            ]);
 
-    public function logout(Request $request)
-    {
-        $sessionId = $request->cookie('session_token');
-        
-        if ($sessionId) {
-            Session::where('sessionId', $sessionId)->delete();
+            $user = User::where('email', $validated['email'])->first();
+
+            if (!$user) {
+                return response()->json(['message' => 'User not found'], 404);
+            }
+
+            if ($user->otp_requested_at && now()->diffInSeconds($user->otp_requested_at) < 120) {
+                $secondsLeft = 120 - now()->diffInSeconds($user->otp_requested_at);
+                return response()->json([
+                    'message' => 'Please wait before requesting a new OTP',
+                    'retry_after_seconds' => $secondsLeft,
+                ], 429);
+            }
+            $otp = random_int(1000, 9999);
+
+            $user->otp_code = $otp;
+            $user->otp_expires_at = now()->addMinutes(10); 
+            $user->otp_requested_at = now();               
+            $user->save();
+
+            Mail::raw("Your OTP is: $otp", function ($message) use ($user) {
+                $message->to($user->email)
+                        ->subject('Password Reset OTP');
+            });
+
+            return response()->json(['message' => 'OTP sent successfully'], 200);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'An error occurred while sending OTP',
+                'error' => $e->getMessage(),
+            ], 500);
         }
-
-        return redirect('/')->cookie(Cookie::forget('session_token'));
     }
+    // verify and reset password
+    public function resetPassword(Request $request){
+        try {
+            $validated = $request->validate([
+                'email' => 'required|email',
+                'otp' => 'required|digits:4',
+                'new_password' => 'required|min:6|confirmed',
+            ]);
 
-    public function showForgotPasswordForm()
-    {
-        return view('forgot-password');
-    }
+         
+            $user = User::where('email', $validated['email'])->first();
 
-    public function sendPasswordResetOtp(Request $request)
-    {
-        $request->validate(['email' => 'required|email']);
+            if (!$user) {
+                return response()->json(['message' => 'User not found'], 404);
+            }
 
-        $user = User::where('email', $request->email)->first();
+           
+            if ($user->otp_code !== $validated['otp']) {
+                return response()->json(['message' => 'Invalid OTP'], 400);
+            }
 
-        if (!$user) {
-            return back()->withErrors(['email' => 'Email not found'])->withInput();
+            if (now()->gt($user->otp_expires_at)) {
+                return response()->json(['message' => 'OTP has expired'], 400);
+            }
+
+            
+            $user->password = Hash::make($validated['new_password']);
+
+           
+            $user->otp_code = null;
+            $user->otp_expires_at = null;
+            $user->save();
+
+            return response()->json([
+                'message' => 'Password reset successful',
+            ], 200);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'An error occurred while resetting password',
+                'error' => $e->getMessage(),
+            ], 500);
         }
-
-        // Generate 6-digit OTP
-        $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-        
-        // Store hashed OTP
-        PasswordReset::create([
-            'userId' => $user->id,
-            'otpHash' => Hash::make($otp),
-            'ipAddress' => $request->ip(),
-            'expiresAt' => Carbon::now()->addMinutes(30),
-        ]);
-
-        // In a real app, you would send the OTP via email/SMS
-        // For this example, we'll just return it (don't do this in production!)
-        return redirect()->route('password.reset.form', ['email' => $user->email])
-                         ->with('otp', $otp)
-                         ->with('email', $user->email);
     }
 
-    public function showResetPasswordForm(Request $request)
-    {
-        return view('reset-password', [
-            'email' => $request->email,
-            'otp' => $request->session()->get('otp'),
-        ]);
-    }
+    
 
-    public function resetPassword(Request $request)
-    {
-        $request->validate([
-            'email' => 'required|email',
-            'otp' => 'required|string|size:6',
-            'password' => 'required|string|min:8|confirmed',
-        ]);
 
-        $user = User::where('email', $request->email)->first();
-
-        if (!$user) {
-            return back()->withErrors(['email' => 'Email not found'])->withInput();
-        }
-
-        $resetRecord = PasswordReset::where('userId', $user->id)
-            ->where('expiresAt', '>', Carbon::now())
-            ->latest()
-            ->first();
-
-        if (!$resetRecord || !Hash::check($request->otp, $resetRecord->otpHash)) {
-            return back()->withErrors(['otp' => 'Invalid or expired OTP'])->withInput();
-        }
-
-        // Update password
-        $user->update(['passwordHash' => Hash::make($request->password)]);
-
-        // Delete all OTPs for this user
-        PasswordReset::where('userId', $user->id)->delete();
-
-        return redirect()->route('login')->with('success', 'Password reset successfully! Please login with your new password.');
-    }
-
-    public function verifyEmail($token)
-    {
-        $verification = UserVerification::where('verificationToken', $token)
-            ->where('expiresAt', '>', Carbon::now())
-            ->first();
-
-        if (!$verification) {
-            return redirect()->route('login')->with('error', 'Invalid or expired verification token.');
-        }
-
-        $user = $verification->user;
-        $user->update(['status' => 'verified']);
-
-        // Delete all verification tokens for this user
-        UserVerification::where('userId', $user->id)->delete();
-
-        return redirect()->route('login')->with('success', 'Email verified successfully! You can now login.');
-    }
 }
+
