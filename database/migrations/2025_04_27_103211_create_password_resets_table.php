@@ -13,11 +13,11 @@ return new class extends Migration
     {
         Schema::create('password_resets', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('userId')->constrained('users');
-            $table->char('otpHash', 128);
-            $table->string('ipAddress', 45);
-            $table->timestamp('expiresAt');
-            $table->timestamp('createdAt')->useCurrent();
+            $table->foreignId('user_id')->constrained()->onDelete('cascade');
+            $table->char('otp_hash', 128);
+            $table->string('ip_address', 45);
+            $table->timestamp('expires_at');
+            $table->timestamps();
         });
     }
 

@@ -12,15 +12,15 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('sessions', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('userId')->constrained('users');
-            $table->char('sessionId', 64);
-            $table->string('ipAddress', 45);
-            $table->text('userAgent');
-            $table->json('metadata')->nullable();
-            $table->timestamp('expiresAt');
-            $table->timestamp('createdAt')->useCurrent();;
+            $table->string('id')->primary(); // string, not uuid
+            $table->foreignId('user_id')->nullable()->constrained()->onDelete('cascade'); // optional
+            $table->string('ip_address', 45)->nullable();
+            $table->text('user_agent')->nullable();
+            $table->text('payload'); // 
+            $table->integer('last_activity'); //
         });
+        
+        
     }
 
     /**

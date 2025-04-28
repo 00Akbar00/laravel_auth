@@ -12,13 +12,12 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('users', function (Blueprint $table) {
-            $table->id();
+            $table->id(); // bigint
             $table->string('name');
             $table->string('email')->unique();
             $table->string('passwordHash');
             $table->enum('status', ['unverified', 'verified'])->default('unverified');
-            $table->timestamp('createdAt')->useCurrent();
-            $table->timestamp('updatedAt')->useCurrent()->useCurrentOnUpdate();
+            $table->timestamps(); // includes created_at & updated_at
         });
     }
 

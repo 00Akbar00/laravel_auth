@@ -3,28 +3,27 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 
 class User extends Model
 {
-    protected $fillable = ['email', 'passwordHash', 'status'];
+    use HasFactory;
 
-    public function verifications()
+    protected $fillable = ['name', 'email', 'passwordHash', 'status'];
+
+    public function sessions()
     {
-        return $this->hasMany(UserVerification::class, 'userId');
+        return $this->hasMany(Session::class);
     }
 
     public function tokens()
     {
-        return $this->hasMany(PersonalAccessToken::class, 'userId');
-    }
-
-    public function sessions()
-    {
-        return $this->hasMany(Session::class, 'userId');
+        return $this->hasMany(PersonalAccessToken::class);
     }
 
     public function passwordResets()
     {
-        return $this->hasMany(PasswordReset::class, 'userId');
+        return $this->hasMany(PasswordReset::class);
     }
 }
+

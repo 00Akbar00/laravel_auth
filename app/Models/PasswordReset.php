@@ -3,15 +3,21 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 
 class PasswordReset extends Model
 {
-    public $timestamps = false;
+    use HasFactory;
 
-    protected $fillable = ['userId', 'otpHash', 'ipAddress', 'expiresAt'];
+    protected $fillable = ['user_id', 'otp_hash', 'ip_address', 'expires_at'];
+
+    protected $casts = [
+        'expires_at' => 'datetime',
+    ];
 
     public function user()
     {
-        return $this->belongsTo(User::class, 'userId');
+        return $this->belongsTo(User::class);
     }
 }
+
