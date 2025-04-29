@@ -38,7 +38,7 @@ class AuthController extends Controller
             ]);
             Log::info('User created', ['email' => $user->email]);
             $emailResult = $this->mailService->sendWelcomeEmail($user);
-            
+
             if (!$emailResult['status']) {
                 Log::error('Welcome email failed for user ' . $user->email, $emailResult);
                 // Continue anyway since user is created, but log the error
@@ -49,7 +49,6 @@ class AuthController extends Controller
                 'email_sent' => $emailResult['status'],
                 'email_message' => $emailResult['message'] ?? null,
             ], 201);
-
         } catch (\Exception $e) {
             Log::error('Signup error: ' . $e->getMessage());
             return response()->json([
@@ -80,13 +79,11 @@ class AuthController extends Controller
                 'message' => 'Login successful',
                 'token' => $token,
             ], 200);
-
         } catch (ValidationException $e) {
             return response()->json([
                 'message' => 'Validation failed',
                 'errors' => $e->errors(),
             ], 422);
-
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'An error occurred during login',
@@ -106,14 +103,22 @@ class AuthController extends Controller
             $user = User::where('email', $validated['email'])->first();
 
             if (!$user) {
-                return response()->json(['message' => 'User not found'], 404);
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'User not found',
+                    'data' => null,
+                ], 404);
             }
 
             if ($user->otp_requested_at && now()->diffInSeconds($user->otp_requested_at) < 120) {
                 $secondsLeft = 120 - now()->diffInSeconds($user->otp_requested_at);
+
                 return response()->json([
-                    'message' => 'Please wait before requesting a new OTP',
-                    'retry_after_seconds' => $secondsLeft,
+                    'status' => 'error',
+                    'message' => 'Too many requests. Please wait before requesting a new OTP.',
+                    'data' => [
+                        'retry_after_seconds' => $secondsLeft,
+                    ],
                 ], 429);
             }
 
@@ -126,21 +131,30 @@ class AuthController extends Controller
 
             $this->mailService->sendOtpEmail($user, $otp);
 
-            return response()->json(['message' => 'OTP sent successfully'], 200);
-
+            return response()->json([
+                'status' => 'success',
+                'message' => 'OTP sent successfully.',
+                'data' => [
+                    'email' => $user->email,
+                ],
+            ], 200);
         } catch (ValidationException $e) {
             return response()->json([
-                'message' => 'Validation failed',
+                'status' => 'fail',
+                'message' => 'Validation failed.',
                 'errors' => $e->errors(),
             ], 422);
-
         } catch (\Exception $e) {
             return response()->json([
-                'message' => 'An error occurred while sending OTP',
-                'error' => $e->getMessage(),
+                'status' => 'error',
+                'message' => 'An internal error occurred while sending the OTP.',
+                'error' => [
+                    'message' => $e->getMessage(),
+                ],
             ], 500);
         }
     }
+
 
     // Verify OTP and Reset Password
     public function resetPassword(Request $request)
@@ -155,15 +169,27 @@ class AuthController extends Controller
             $user = User::where('email', $validated['email'])->first();
 
             if (!$user) {
-                return response()->json(['message' => 'User not found'], 404);
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'User not found.',
+                    'data' => null,
+                ], 404);
             }
 
             if ($user->otp_code !== $validated['otp']) {
-                return response()->json(['message' => 'Invalid OTP'], 400);
+                return response()->json([
+                    'status' => 'fail',
+                    'message' => 'Invalid OTP provided.',
+                    'data' => null,
+                ], 400);
             }
 
             if (now()->gt($user->otp_expires_at)) {
-                return response()->json(['message' => 'OTP has expired'], 400);
+                return response()->json([
+                    'status' => 'fail',
+                    'message' => 'OTP has expired.',
+                    'data' => null,
+                ], 400);
             }
 
             $user->password = Hash::make($validated['new_password']);
@@ -172,19 +198,25 @@ class AuthController extends Controller
             $user->save();
 
             return response()->json([
-                'message' => 'Password reset successful',
+                'status' => 'success',
+                'message' => 'Password has been reset successfully.',
+                'data' => [
+                    'email' => $user->email,
+                ],
             ], 200);
-
         } catch (ValidationException $e) {
             return response()->json([
-                'message' => 'Validation failed',
+                'status' => 'fail',
+                'message' => 'Validation failed.',
                 'errors' => $e->errors(),
             ], 422);
-
         } catch (\Exception $e) {
             return response()->json([
-                'message' => 'An error occurred while resetting password',
-                'error' => $e->getMessage(),
+                'status' => 'error',
+                'message' => 'An internal error occurred while resetting the password.',
+                'error' => [
+                    'message' => $e->getMessage(),
+                ],
             ], 500);
         }
     }
