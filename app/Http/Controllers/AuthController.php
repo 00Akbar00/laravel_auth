@@ -5,19 +5,24 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Mail;
-use App\Mail\WelcomeMail;
 use App\Services\TokenService;
+use App\Services\MailService;
+use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
     protected $tokenService;
+    protected $mailService;
 
-    public function __construct(TokenService $tokenService){
+    public function __construct(TokenService $tokenService, MailService $mailService)
+    {
         $this->tokenService = $tokenService;
+        $this->mailService = $mailService;
     }
-    // signup
-    public function signup(Request $request){
+
+    // User Signup
+    public function signup(Request $request)
+    {
         try {
             $request->validate([
                 'name' => 'required|string|max:255',
@@ -31,19 +36,22 @@ class AuthController extends Controller
                 'password' => Hash::make($request->password),
             ]);
 
-            Mail::to($user->email)->send(new WelcomeMail($user));
+            $this->mailService->sendWelcomeEmail($user);
 
             return response()->json([
                 'message' => 'User registered successfully. A welcome email has been sent.'
             ], 201);
+
         } catch (\Exception $e) {
             return response()->json([
                 'error' => 'An error occurred during signup: ' . $e->getMessage()
             ], 500);
         }
     }
-    // Login
-    public function login(Request $request){
+
+    // User Login
+    public function login(Request $request)
+    {
         try {
             $validated = $request->validate([
                 'email' => 'required|email',
@@ -63,7 +71,7 @@ class AuthController extends Controller
                 'token' => $token,
             ], 200);
 
-        } catch (\Illuminate\Validation\ValidationException $e) {
+        } catch (ValidationException $e) {
             return response()->json([
                 'message' => 'Validation failed',
                 'errors' => $e->errors(),
@@ -76,8 +84,10 @@ class AuthController extends Controller
             ], 500);
         }
     }
-    // Send otp
-    public function sendOtp(Request $request){
+
+    // Send OTP
+    public function sendOtp(Request $request)
+    {
         try {
             $validated = $request->validate([
                 'email' => 'required|email',
@@ -96,21 +106,19 @@ class AuthController extends Controller
                     'retry_after_seconds' => $secondsLeft,
                 ], 429);
             }
+
             $otp = random_int(1000, 9999);
 
             $user->otp_code = $otp;
-            $user->otp_expires_at = now()->addMinutes(10); 
-            $user->otp_requested_at = now();               
+            $user->otp_expires_at = now()->addMinutes(10);
+            $user->otp_requested_at = now();
             $user->save();
 
-            Mail::raw("Your OTP is: $otp", function ($message) use ($user) {
-                $message->to($user->email)
-                        ->subject('Password Reset OTP');
-            });
+            $this->mailService->sendOtpEmail($user, $otp);
 
             return response()->json(['message' => 'OTP sent successfully'], 200);
 
-        } catch (\Illuminate\Validation\ValidationException $e) {
+        } catch (ValidationException $e) {
             return response()->json([
                 'message' => 'Validation failed',
                 'errors' => $e->errors(),
@@ -123,8 +131,10 @@ class AuthController extends Controller
             ], 500);
         }
     }
-    // verify and reset password
-    public function resetPassword(Request $request){
+
+    // Verify OTP and Reset Password
+    public function resetPassword(Request $request)
+    {
         try {
             $validated = $request->validate([
                 'email' => 'required|email',
@@ -132,14 +142,12 @@ class AuthController extends Controller
                 'new_password' => 'required|min:6|confirmed',
             ]);
 
-         
             $user = User::where('email', $validated['email'])->first();
 
             if (!$user) {
                 return response()->json(['message' => 'User not found'], 404);
             }
 
-           
             if ($user->otp_code !== $validated['otp']) {
                 return response()->json(['message' => 'Invalid OTP'], 400);
             }
@@ -148,10 +156,7 @@ class AuthController extends Controller
                 return response()->json(['message' => 'OTP has expired'], 400);
             }
 
-            
             $user->password = Hash::make($validated['new_password']);
-
-           
             $user->otp_code = null;
             $user->otp_expires_at = null;
             $user->save();
@@ -160,7 +165,7 @@ class AuthController extends Controller
                 'message' => 'Password reset successful',
             ], 200);
 
-        } catch (\Illuminate\Validation\ValidationException $e) {
+        } catch (ValidationException $e) {
             return response()->json([
                 'message' => 'Validation failed',
                 'errors' => $e->errors(),
@@ -173,10 +178,4 @@ class AuthController extends Controller
             ], 500);
         }
     }
-
-    
-
-
 }
-
- 
