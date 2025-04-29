@@ -22,7 +22,7 @@ class TokenService
         ];
 
         $issuedAt = Carbon::now()->timestamp;
-        $expirationTime = Carbon::now()->addHours(2)->timestamp;
+        $expirationTime = Carbon::now()->addHours(1)->timestamp;
 
         $payload = [
             'iat' => $issuedAt,

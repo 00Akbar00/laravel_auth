@@ -69,8 +69,12 @@ class AuthController extends Controller
 
             $user = User::where('email', $validated['email'])->first();
 
-            if (!$user || !Hash::check($validated['password'], $user->password)) {
-                return response()->json(['message' => 'Invalid credentials'], 401);
+            if(!$user){
+                return response()->json(['message'=>'User dose not exists'], 404);
+            }
+
+            if (!Hash::check($validated['password'], $user->password)) {
+                return response()->json(['message' => 'Invalid email or password'], 401);
             }
 
             $token = $this->tokenService->generateToken($user);
