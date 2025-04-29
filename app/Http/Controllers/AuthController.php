@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Hash;
 use App\Services\TokenService;
 use App\Services\MailService;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\Log;
 
 class AuthController extends Controller
 {
@@ -23,28 +24,37 @@ class AuthController extends Controller
     // User Signup
     public function signup(Request $request)
     {
-        try {
-            $request->validate([
-                'name' => 'required|string|max:255',
-                'email' => 'required|email|unique:users,email',
-                'password' => 'required|string|min:6|confirmed',
-            ]);
+        $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|unique:users,email',
+            'password' => 'required|string|min:6|confirmed',
+        ]);
 
+        try {
             $user = User::create([
                 'name' => $request->name,
                 'email' => $request->email,
                 'password' => Hash::make($request->password),
             ]);
-
-            $this->mailService->sendWelcomeEmail($user);
+            Log::info('User created', ['email' => $user->email]);
+            $emailResult = $this->mailService->sendWelcomeEmail($user);
+            
+            if (!$emailResult['status']) {
+                Log::error('Welcome email failed for user ' . $user->email, $emailResult);
+                // Continue anyway since user is created, but log the error
+            }
 
             return response()->json([
-                'message' => 'User registered successfully. A welcome email has been sent.'
+                'message' => 'User registered successfully.',
+                'email_sent' => $emailResult['status'],
+                'email_message' => $emailResult['message'] ?? null,
             ], 201);
 
         } catch (\Exception $e) {
+            Log::error('Signup error: ' . $e->getMessage());
             return response()->json([
-                'error' => 'An error occurred during signup: ' . $e->getMessage()
+                'error' => 'User registration failed',
+                'message' => $e->getMessage()
             ], 500);
         }
     }
